@@ -1,6 +1,8 @@
-#Goal: organize hits for hydrocarbon degrading marker genes and construct multiple sequence alignment
-#for downstream analyses. There are numerous marker genes, so I wrote this script to go from an hmm output
-#for the CANTHYD database to multiple sequence alignments for those genes across your mags/genomes of interest.
+#Goal: organize hits for hydrocarbon degrading marker genes, extract relevant FNA and AA seqs,
+#construct multiple sequence alignments, and filter alignments for quality control.
+    ##Provides alignments for downstream analyses. There are numerous marker genes, so I wrote this script to go from an hmm output
+    ##for the CANTHYD database to multiple sequence alignments for those genes across your mags/genomes of interest.
+
 #Required inputs: 
     #a. List of genome names (needed to point tools to appropriate fasta or tsv files): all_cyclo_genomes.txt
     #b. Gene hits output from hmmer (in my case this was for the CANTHYD database)
@@ -8,6 +10,7 @@
       #depending on if I was analysing nucleotide or amino acid sequences).
     #d. Python script: merge_hmmsearch_and_gene_annotation.py
 
+#MULTIPLE BASH SCRIPTS/LOOPS WITH A COMMON SET OF BASH VARIABLES
 
 #Set common variables
 genome_list=/path/to/genome_list.txt  #This will set the ${genome} variable
@@ -26,7 +29,7 @@ merge_python_script_requirements=path/to/merge_requirements.txt
 outdir=path/to/primary/output/dir
 mkdir -p ${outdir}
 
-#1. Merge gff files with hmm outputs
+#1. Merge gff files with hmm outputs-----------------------------------------------
   ##(written as a slurm array job for the Nibi Compute Canada Cluster)
 
 genome=$(sed -n "${SLURM_ARRAY_TASK_ID}p" ${genome_list})
@@ -46,7 +49,7 @@ python ${script} \
         --out ${outdir}/${genome}_hmm_w_gff.tsv \
         --join inner
 
-#2. Remove weird symbols from gene names if necessary such as spaces, '%', and '/', in gene names 
+#2. Remove weird symbols from gene names if necessary such as spaces, '%', and '/', in gene names ----------------
   ##Helpful for organizing files by gene downstream. Below are examples I of characters I was removing.
   
 for genome in $(cat ${genome_list}); do
@@ -66,7 +69,7 @@ gsub("/", "_", $7)} 1' ${hmm_w_gff};
 done
 
 
-#3. Concatenate files to get list of unique gene names
+#3. Concatenate files to get list of unique gene names----------------------------------------------
 
 awk 'NR==1 || FNR>1' \
     ${outdir}/*_hmm_w_gff.tsv \
@@ -78,7 +81,7 @@ cat ${outdir}/all_hmm_w_gff.tsv \
 ##Make unique variable to keep referring to this unique list of HC-degrading marker genes
 unique=${outdir}/unique_gene_hits.tsv
 
-#4. Organize the genes into 1 type per file, but keep files separated by MAG/genome.
+#4. Organize the genes into 1 type per file, but keep files separated by MAG/genome.-------------------
 ##Note: column 3 referenced in the awk script below hosts the gene annotations that I am organizing by.
 
 for genome in $(cat ${genome_list}); do
@@ -93,8 +96,10 @@ ${outdir}/${genome}/${gene}_regions.tsv;
 done;
 done
 
-#5a. Pull each amino acid sequence from the bakta .faa file using the bakta gene ID. We are using a simple grep search to find the header and print the line immediately below. We need to cycle through all unique bakta IDs in a given region file and pull out the amino acid sequences from bakta .faa output:
-  ##(written as a slurm job for the Nibi Compute Canada Cluster)
+#5a. Pull each amino acid sequence from the bakta .faa file using the bakta gene ID.-----------------------
+    ##We are using a simple grep search to find the header and print the line immediately below. 
+    ##We need to cycle through all unique bakta IDs in a given region file and pull out the amino acid sequences from bakta .faa output:
+    ##(written as a slurm job for the Nibi Compute Canada Cluster)
 
 for genome in $(cat ${genome_list}); do
 for gene in $(cat ${unique}); do
@@ -105,7 +110,7 @@ done;
 done;
 done
 
-#5b. Pull each genome sequence from the bakta .fna file using genome regions and the samtools faidx tool
+#5b. Pull each genome sequence from the bakta .fna file using genome regions and the samtools faidx tool-----------
   ##(written as a slurm job for the Nibi Compute Canada Cluster)
   ##NOTE: in the awk script within faidx, change $NF to whatever column has the 
   
@@ -127,7 +132,7 @@ done;
 done
 
 
-#6. In .fna and .faa files we just created, add genome name to beginning of the header.
+#6. In .fna and .faa files we just created, add genome name to beginning of the header.-----------------
 for genome in $(cat ${genome_list}); do
 for gene in $(cat ${unique}); do
 gawk -i inplace -v name=${genome} 'BEGIN{FS=OFS="\t"} {gsub(">", ">"name";")} 1' \
@@ -143,7 +148,7 @@ done;
 done
 
 
-#7. Concat all fastas for a particular gene across genomes
+#7. Concat all fastas for a particular gene across genomes--------------------------------------------
 for genome in $(cat ${genome_list}); do
 for gene in $(cat ${unique}); do
 mkdir -p ${outdir}/${gene}
@@ -165,7 +170,7 @@ for gene in $(cat ${unique}); do
 cat ${outdir}/${gene}/*.fna > ${outdir}/${gene}_all_genomes.fna;
 done
 
-#8. Multiple sequence alignment (written as slurm array job)
+#8. Multiple sequence alignment (written as slurm array job)--------------------------------------------
 #(written as a slurm for the Nibi Compute Canada Cluster)
 
 mkdir -p ${outdir}/msa
@@ -187,7 +192,7 @@ mafft --genafpair \
 --reorder ${outdir}/${gene}_all_genomes.faa > ${outdir}/msa/${gene}_all_genomes_alignment.faa;
 done
 
-#9. Filter out columns with >80% gaps using TrimAl 
+#9. Filter out columns with >80% gaps using TrimAl--------------------------------------------------------
 #(written as a slurm array job for the Nibi Compute Canada Cluster)
 module load trimal
 
