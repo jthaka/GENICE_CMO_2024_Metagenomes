@@ -8,7 +8,7 @@
     #b. Gene hits output from hmmer (in my case this was for the CANTHYD database)
     #c. List of gene calls (in my case I was working with the .gff3 output or .faa output from bakta
       #depending on if I was analysing nucleotide or amino acid sequences).
-    #d. Python script: merge_hmmsearch_and_gene_annotation.py
+    #d. Python script (found in this repository): merge_hmmsearch_and_gene_annotation.py
 
 #MULTIPLE BASH SCRIPTS/LOOPS WITH A COMMON SET OF BASH VARIABLES
 
@@ -23,7 +23,7 @@ gene_calls_file=annotation.gff3
 amino_acid_calls_dir=/path/to/gene/calls/output/per/${genome}
 amino_acid_calls_file=annotation.fa
 merge_python_script=path/to/merge_hmmsearch_and_gene_annotation.py
-merge_python_script_requirements=path/to/merge_requirements.txt
+merge_python_script_requirements=path/to/merge_hmmsearch_and_gene_annotation_python_installs.txt
 
 #Make the primary output directory
 outdir=path/to/primary/output/dir
@@ -43,7 +43,7 @@ pip install -r ${merge_python_script_requirements}
 EOF
 # activate only on main node
 source $SLURM_TMPDIR/env/bin/activate;
-python ${script} \
+python ${merge_python_script} \
         --gff3 ${gene_calls_dir}/${gene_calls_file} \
         --tblout ${hmm_tblout_dir}/${hmm_tblout_file} \
         --out ${outdir}/${genome}_hmm_w_gff.tsv \
