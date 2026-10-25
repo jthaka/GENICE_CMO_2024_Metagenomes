@@ -29,7 +29,7 @@ merge_python_script_requirements=path/to/merge_requirements.txt
 outdir=path/to/primary/output/dir
 mkdir -p ${outdir}
 
-#1. Merge gff files with hmm outputs-----------------------------------------------
+#1. Merge gff files with hmm outputs-----------------------------------------------------------------------------------------------------------------------------------------------
   ##(written as a slurm array job for the Nibi Compute Canada Cluster)
 
 genome=$(sed -n "${SLURM_ARRAY_TASK_ID}p" ${genome_list})
@@ -49,39 +49,54 @@ python ${script} \
         --out ${outdir}/${genome}_hmm_w_gff.tsv \
         --join inner
 
-#2. Remove weird symbols from gene names if necessary such as spaces, '%', and '/', in gene names ----------------
+#2a. Remove weird symbols from gene names if necessary such as spaces, '%', and '/', in gene names --------------------------------------------------------------------------------
   ##Helpful for organizing files by gene downstream. Below are examples I of characters I was removing.
   
 for genome in $(cat ${genome_list}); do
-hmm_w_gff_dir=${outdir}/${genome}_hmm_w_gff.tsv
+hmm_w_gff=${outdir}/${genome}_hmm_w_gff.tsv
 gawk -i inplace 'BEGIN{FS=OFS="\t"} {
 gsub(/[[:blank:]]/, "_", $7)} 1' ${hmm_w_gff};
 done
 for genome in $(cat ${genome_list}); do
-hmm_w_gff_dir=${outdir}/${genome}_hmm_w_gff.tsv
+hmm_w_gff=${outdir}/${genome}_hmm_w_gff.tsv
 gawk -i inplace 'BEGIN{FS=OFS="\t"} {
 gsub(/'%'/, "_", $7)} 1' ${hmm_w_gff};
 done
 for genome in $(cat ${genome_list}); do
-hmm_w_gff_dir=${outdir}/${genome}_hmm_w_gff.tsv
+hmm_w_gff=${outdir}/${genome}_hmm_w_gff.tsv
 gawk -i inplace 'BEGIN{FS=OFS="\t"} {
 gsub("/", "_", $7)} 1' ${hmm_w_gff};
 done
 
+#2b. Specific for the CANTHYD output: I would like to create a field that combines the simple CANTHYD query name with gene description.--------------------------------------------
+	##The gene description includes extra information of things like the particular subunit that the gene is encoding.
+	##Therefore I want to have the option later on to organize by the detailed description of the hit.
+	##I want to concat with the simple gene query, as some of the detailed descriptions can be identical between two enzyme systems
+	##(e.g., MAH_alpha and TmoA could have the same gene product description, but I want to keep these separate to stay true to the HMMs annotation).
 
-#3. Concatenate files to get list of unique gene names----------------------------------------------
+for genome in $(cat ${genome_list}); do
+hmm_w_gff=${outdir}/${genome}_hmm_w_gff.tsv
+gawk -i inplace 'BEGIN{FS=OFS="\t"} NR==1{$(NF+1)="enzyme_and_description"; print; next} {$(NF+1)="(" $3 ")" "_" $7; print}' ${hmm_w_gff};
+done
+
+
+#3. Concatenate files to get list of unique gene names-----------------------------------------------------------------------------------------------------------------------------
 
 awk 'NR==1 || FNR>1' \
     ${outdir}/*_hmm_w_gff.tsv \
 > ${outdir}/all_hmm_w_gff.tsv
 
-cat ${outdir}/all_hmm_w_gff.tsv \
-| cut -f 3 | sort | uniq \
-> ${outdir}/unique_gene_hits.tsv
 ##Make unique variable to keep referring to this unique list of HC-degrading marker genes
-unique=${outdir}/unique_gene_hits.tsv
+##Change $(NF) to whatever field you are organizing by.
 
-#4. Organize the genes into 1 type per file, but keep files separated by MAG/genome.-------------------
+awk 'BEGIN{FS=OFS="\t"} {print $(NF)}' ${outdir}/all_hmm_w_gff.tsv | cat | sort | uniq \
+> ${outdir}/unique_hits.tsv
+
+##Make unique variable to keep referring to this unique list of HC-degrading marker genes
+unique=${outdir}/unique_hits.tsv
+
+
+#4. Organize the genes into 1 type per file, but keep files separated by MAG/genome.-----------------------------------------------------------------------------------------------
 ##Note: column 3 referenced in the awk script below hosts the gene annotations that I am organizing by.
 
 for genome in $(cat ${genome_list}); do
@@ -96,7 +111,7 @@ ${outdir}/${genome}/${gene}_regions.tsv;
 done;
 done
 
-#5a. Pull each amino acid sequence from the bakta .faa file using the bakta gene ID.-----------------------
+#5a. Pull each amino acid sequence from the bakta .faa file using the bakta gene ID.-----------------------------------------------------------------------------------------------
     ##We are using a simple grep search to find the header and print the line immediately below. 
     ##We need to cycle through all unique bakta IDs in a given region file and pull out the amino acid sequences from bakta .faa output:
     ##(written as a slurm job for the Nibi Compute Canada Cluster)
@@ -110,7 +125,7 @@ done;
 done;
 done
 
-#5b. Pull each genome sequence from the bakta .fna file using genome regions and the samtools faidx tool-----------
+#5b. Pull each genome sequence from the bakta .fna file using genome regions and the samtools faidx tool---------------------------------------------------------------------------
   ##(written as a slurm job for the Nibi Compute Canada Cluster)
   ##NOTE: in the awk script within faidx, change $NF to whatever column has the 
   
@@ -132,7 +147,7 @@ done;
 done
 
 
-#6. In .fna and .faa files we just created, add genome name to beginning of the header.-----------------
+#6. In .fna and .faa files we just created, add genome name to beginning of the header.--------------------------------------------------------------------------------------------
 for genome in $(cat ${genome_list}); do
 for gene in $(cat ${unique}); do
 gawk -i inplace -v name=${genome} 'BEGIN{FS=OFS="\t"} {gsub(">", ">"name";")} 1' \
@@ -148,7 +163,7 @@ done;
 done
 
 
-#7. Concat all fastas for a particular gene across genomes--------------------------------------------
+#7. Concat all fastas for a particular gene across genomes-------------------------------------------------------------------------------------------------------------------------
 for genome in $(cat ${genome_list}); do
 for gene in $(cat ${unique}); do
 mkdir -p ${outdir}/${gene}
@@ -170,7 +185,7 @@ for gene in $(cat ${unique}); do
 cat ${outdir}/${gene}/*.fna > ${outdir}/${gene}_all_genomes.fna;
 done
 
-#8. Multiple sequence alignment (written as slurm array job)--------------------------------------------
+#8. Multiple sequence alignment (written as slurm array job)-----------------------------------------------------------------------------------------------------------------------
 #(written as a slurm for the Nibi Compute Canada Cluster)
 
 mkdir -p ${outdir}/msa
@@ -192,7 +207,7 @@ mafft --genafpair \
 --reorder ${outdir}/${gene}_all_genomes.faa > ${outdir}/msa/${gene}_all_genomes_alignment.faa;
 done
 
-#9. Filter out columns with >80% gaps using TrimAl--------------------------------------------------------
+#9. Filter out columns with >80% gaps using TrimAl---------------------------------------------------------------------------------------------------------------------------------
 #(written as a slurm array job for the Nibi Compute Canada Cluster)
 module load trimal
 
@@ -212,6 +227,37 @@ trimal -in ${outdir}/msa/${gene}_all_genomes_alignment.faa -out ${outdir}/msa/${
 -sident \
 -soverlap \
 -htmlout ${outdir}/msa/${gene}_all_genomes_alignment_filt.html;
+done
+
+
+#10. Get counts for each gene in each genome---------------------------------------------------------------------------------------------------------------------------------------
+	##We are going to use the the hmm_w_gff files we created at the beginning to get counts for each unique gene.
+	##You just need to define the column that describes the gene annotation you would like to count by.
+
+##Change NF to the column for which you want to organize/count by
+mkdir -p ${outdir}/gene_counts
+mkdir -p ${outdir}/gene_counts/separated_by_genome
+
+for genome in $(cat ${genome_list}); do
+awk 'BEGIN{FS=OFS="\t"} NR==1{print "gene_hit\tcount_in_genome\tgenome"; next} NR>1 {count[$(NF)]++} END {for (i in count) print i, count[i]}' ${outdir}/${genome}_hmm_w_gff.tsv > ${outdir}/gene_counts/separated_by_genome/${genome}_gene_counts.tsv
+
+gawk -i inplace -v genome=${genome} -FS'\t' -v OFS='\t' 'NR==1{$(NF+1)="genome"; print; next} {$(NF+1)=genome; print}' \
+${outdir}/gene_counts/separated_by_genome/${genome}_gene_counts.tsv;
+done
+
+##Create a summary count file (1 file per gene, but counts from genomes are combined)
+	##The unique variable should reflect the exact gene annotations used to count by.
+	##In my case this was a combination of the gene name and product description I made earlier on.
+
+for genome in $(cat ${genome_list}); do
+for gene in $(cat ${unique}); do
+awk -F'\t' -v OFS='\t' \
+    -v col=1 \
+    -v val=${gene} \
+    '$col==val { print }' \
+${outdir}/gene_counts/separated_by_genome/${genome}_gene_counts.tsv \
+>> ${outdir}/gene_counts/gene_counts_all_genomes.tsv;
+done;
 done
 
 #Filtered alignments and html files are used for downstream analyses (e.g., tree construction)
