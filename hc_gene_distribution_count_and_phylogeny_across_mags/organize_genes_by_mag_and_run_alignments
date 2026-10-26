@@ -1,0 +1,343 @@
+#Goal: organize hits for hydrocarbon degrading marker genes, extract relevant FNA and AA seqs,
+#construct multiple sequence alignments, and filter alignments for quality control.
+    ##Provides alignments for downstream analyses. There are numerous marker genes, so I wrote this script to go from an hmm output
+    ##for the CANTHYD database to multiple sequence alignments for those genes across your mags/genomes of interest.
+
+#Required inputs: 
+    #a. List of genome names (needed to point tools to appropriate fasta or tsv files): all_cyclo_genomes.txt
+    #b. Gene hits output from hmmer (in my case this was for the CANTHYD database)
+    #c. List of gene calls (in my case I was working with the .gff3 output or .faa output from bakta
+      #depending on if I was analysing nucleotide or amino acid sequences).
+    #d. Python script: merge_hmmsearch_and_gene_annotation.py
+
+#MULTIPLE BASH SCRIPTS/LOOPS WITH A COMMON SET OF BASH VARIABLES
+
+#Set common variables
+genome_list=/project/6105702/CMO_2024_Metagenome/CMO2024_MAGS/mag_sets/0.96_derep_mags_both_pools_magnames.txt
+sample_list=/project/6105702/CMO_2024_Metagenome/CMO2024_MAGS/mag_sets/samplenames.txt
+genome_fasta_dir=/scratch/jthakar/CMO2024_danaseq_outputs/all_samples/${sample}/assembly
+genome_fasta_file=assembly.fasta
+hmm_tblout_dir=/scratch/jthakar/CMO2024_danaseq_outputs/all_samples/${sample}/metabolism/canthyd
+hmm_tblout_file=canthyd_results_noise_cutoff.tblout
+gene_calls_dir=/scratch/jthakar/CMO2024_danaseq_outputs/all_samples/${sample}/annotation/bakta/basic/annotation.gff3
+gene_calls_file=annotation.gff3
+amino_acid_calls_dir=/scratch/jthakar/CMO2024_danaseq_outputs/all_samples/${sample}/annotation/bakta/basic
+amino_acid_calls_file=annotation.faa
+contig_bin_legend=/project/6105702/CMO_2024_Metagenome/CMO2024_MAGS/mag_sets/all_bin_contig_legend_both_pools.tsv
+merge_python_script=/project/6105702/CMO_2024_Metagenome/general_job_scripts/merge_hmmsearch_and_gene_annotation.py
+merge_python_script_requirements=/project/6105702/CMO_2024_Metagenome/general_job_scripts/hmm_bakta_merge_requirements.txt
+
+#Make the primary output directory
+outdir=/project/6105702/CMO_2024_Metagenome/CMO2024_MAGS/canthyd_single_gene_analysis
+mkdir -p ${outdir}
+
+#1. Organize gene annotations and append gene regions from DanaSeq outputs per sample + append bin information
+	##We are first organizing by sample and extracting binned annotations from the sample or coassembly.
+
+	##Merge gff files with CANTHYD hmm outputs
+  	##(written as a slurm array job for the Nibi Compute Canada Cluster so bash variables are re-stated below)
+
+sample_list=/project/6105702/CMO_2024_Metagenome/CMO2024_MAGS/mag_sets/samplenames.txt
+sample=$(sed -n "${SLURM_ARRAY_TASK_ID}p" ${sample_list})
+outdir=/project/6105702/CMO_2024_Metagenome/CMO2024_MAGS/canthyd_single_gene_analysis
+hmm_tblout_dir=/scratch/jthakar/CMO2024_danaseq_outputs/all_samples/${sample}/metabolism/canthyd
+hmm_tblout_file=canthyd_results_noise_cutoff.tblout
+gene_calls_dir=/scratch/jthakar/CMO2024_danaseq_outputs/all_samples/${sample}/annotation/bakta/basic/annotation.gff3
+gene_calls_file=annotation.gff3
+merge_python_script=/project/6105702/CMO_2024_Metagenome/general_job_scripts/merge_hmmsearch_and_gene_annotation.py
+merge_python_script_requirements=/project/6105702/CMO_2024_Metagenome/general_job_scripts/hmm_bakta_merge_requirements.txt
+
+chmod +x ${merge_python_script}
+module load python/3.14
+srun --ntasks $SLURM_NNODES --tasks-per-node=1 bash << EOF
+virtualenv --no-download $SLURM_TMPDIR/env
+source $SLURM_TMPDIR/env/bin/activate
+pip install --no-index --upgrade pip
+pip install -r ${merge_python_script_requirements}
+EOF
+# activate only on main node
+source $SLURM_TMPDIR/env/bin/activate;
+python ${script} \
+        --gff3 ${gene_calls_dir}/${gene_calls_file} \
+        --tblout ${hmm_tblout_dir}/${hmm_tblout_file} \
+        --out ${outdir}/${sample}_hmm_w_gff.tsv \
+        --join inner
+
+
+#2a. Remove weird symbols from gene names if necessary such as spaces, '%', and '/', in gene names --------------------------------------------------------------------------------
+  ##Helpful for organizing files by gene downstream. Below are examples I of characters I was removing.
+
+###Fill in spaces
+for sample in $(cat ${sample_list}); do
+hmm_w_gff=${outdir}/${sample}_hmm_w_gff.tsv
+gawk -i inplace 'BEGIN{FS=OFS="\t"} {
+gsub(/[[:blank:]]/, "_", $31)} 1' ${hmm_w_gff};
+done
+
+###Remove '%'
+for sample in $(cat ${sample_list}); do
+hmm_w_gff=${outdir}/${sample}_hmm_w_gff.tsv
+gawk -i inplace 'BEGIN{FS=OFS="\t"} {
+gsub(/'%'/, "_", $31)} 1' ${hmm_w_gff};
+done
+
+###Replace slashes
+for sample in $(cat ${sample_list}); do
+hmm_w_gff=${outdir}/${sample}_hmm_w_gff.tsv
+gawk -i inplace 'BEGIN{FS=OFS="\t"} {
+gsub("/", "_", $31)} 1' ${hmm_w_gff};
+done
+
+#2b. Specific for the CANTHYD output: I would like to create a field that combines the simple CANTHYD query name with gene description.-------
+	##The gene description includes extra information of things like the particular subunit that the gene is encoding.
+	##Therefore I want to have the option later on to organize by the detailed description of the hit.
+	##I want to concat with the simple gene query, as some of the detailed descriptions can be identical between two enzyme systems
+	##(e.g., MAH_alpha and TmoA could have the same gene product description, but I want to keep these separate to stay true to the HMMs annotation).
+
+for sample in $(cat ${sample_list}); do
+hmm_w_gff=${outdir}/${sample}_hmm_w_gff.tsv
+gawk -i inplace 'BEGIN{FS=OFS="\t"} NR==1{$(NF+1)="enzyme_and_description"; print; next} {$(NF+1)="(" $3 ")" "_" $31; print}' ${hmm_w_gff};
+done
+
+#2c. Append mag name based on contig name
+
+##First add sample identifier to contig labels
+##My contig bin legend does not have headers...just be careful with the join and make sure that it reflects what you need.
+
+for sample in $(cat ${sample_list}); do
+hmm_w_gff=${outdir}/${sample}_hmm_w_gff.tsv
+gawk -i inplace -v sample=${sample} 'BEGIN{FS=OFS="\t"} NR==1{$(NF+1)="sample_contig"; print; next} {$(NF+1)= sample "_" $9; print}' ${hmm_w_gff};
+done
+
+for sample in $(cat ${sample_list}); do
+hmm_w_gff=${outdir}/${sample}_hmm_w_gff.tsv
+join -t $'\t' -1 33 -2 3 -o auto -a 1 \
+<(tail -n +2 ${hmm_w_gff} | sort -t $'\t' -k33,33) \
+<(sort -t $'\t' -k3,3 "${contig_bin_legend}") \
+> ${outdir}/${sample}_hmm_w_gff_int.tsv;
+done
+
+for sample in $(cat ${sample_list}); do
+hmm_w_gff=${outdir}/${sample}_hmm_w_gff.tsv
+mv ${outdir}/${sample}_hmm_w_gff_int.tsv ${hmm_w_gff};
+done
+
+
+#3. Concatenate files to get list of unique gene names-----------------------------------------------------------------------------------------------------------------------------
+
+awk 'NR==1 || FNR>1' \
+    ${outdir}/*_hmm_w_gff.tsv \
+> ${outdir}/all_hmm_w_gff.tsv
+
+##Make unique variable to keep referring to this unique list of HC-degrading marker genes
+##Change $(NF) to whatever field you are organizing by.
+
+awk 'BEGIN{FS=OFS="\t"} {print $33}' ${outdir}/all_hmm_w_gff.tsv | cat | sort | uniq \
+> ${outdir}/unique_hits.tsv
+
+##Make unique variable to keep referring to this unique list of HC-degrading marker genes
+unique=${outdir}/unique_hits.tsv
+
+
+#4. Organize the genes into 1 type per file, but keep files separated by MAG/genome.-----------------------------------------------------------------------------------------------
+##Note: column 3 referenced in the awk script below hosts the gene annotations that I am organizing by.
+
+for protein in $(cat ${unique}); do
+awk -F')_' '{print $1}' <<< ${protein} | sed 's/[(]//g' | sed 's/[)]//g' >> ${outdir}/unique_simple.txt;
+done
+
+unique=${outdir}/unique_simple.txt
+for sample in $(cat ${sample_list}); do
+for gene in $(cat ${unique}); do
+awk -F'\t' -v OFS='\t' \
+    -v col=4 \
+    -v val=${gene} \
+    '$col==val { print }' \
+${outdir}/${sample}_hmm_w_gff.tsv >> ${outdir}/hc_genes/${sample}_${gene}_regions.tsv;
+done;
+done
+
+#5a. Pull each amino acid sequence from the bakta .faa file using the bakta gene ID.-----------------------------------------------------------------------------------------------
+    ##We are using a simple grep search to find the header and print the line immediately below. 
+    ##We need to cycle through all unique bakta IDs in a given region file and pull out the amino acid sequences from bakta .faa output:
+    ##(written as a slurm job for the Nibi Compute Canada Cluster)
+
+mkdir -p ${outdir}/hc_genes/fasta_files
+unique=${outdir}/unique_simple.txt
+for sample in $(cat ${sample_list}); do
+amino_acid_calls_dir=/scratch/jthakar/CMO2024_danaseq_outputs/all_samples/${sample}/annotation/bakta/basic
+amino_acid_calls_file=annotation.faa
+for gene in $(cat ${unique}); do
+for id in $(cat ${outdir}/hc_genes/${sample}_${gene}_regions.tsv | cut -f 2 | sort | uniq); do
+grep -wA 1 "${id}" ${amino_acid_calls_dir}/${amino_acid_calls_file} \
+>> ${outdir}/hc_genes/fasta_files/${sample}_${gene}.faa;
+done;
+done;
+done
+
+#5b. Pull each genome sequence from the bakta .fna file using genome regions and the samtools faidx tool---------------------------------------------------------------------------
+  ##(written as a slurm job for the Nibi Compute Canada Cluster)
+  ##NOTE: in the awk script within faidx, change $NF to whatever column has the gene annotations.
+  ##create a region column that follows the format necessary for Samtools faidx (chr:from-to)
+  ##Column number legend: chromosome/contig label from gene call software output ($9), start position ($11), end position ($12).
+
+for sample in $(cat ${sample_list}); do
+for gene in $(cat ${unique}); do
+gawk -i inplace -F'\t' -v OFS='\t' '{$(NF+1) = $10 ":" $12 "-" $13; print}' \
+${outdir}/hc_genes/${sample}_${gene}_regions.tsv;
+done;
+done
+
+module load samtools
+for sample in $(cat ${sample_list}); do
+assembly=/scratch/jthakar/CMO2024_danaseq_outputs/all_samples/${sample}/assembly/assembly.fasta
+for gene in $(cat ${unique}); do
+samtools faidx ${assembly} \
+-o ${outdir}/hc_genes/fasta_files/${sample}_${gene}.fna \
+-r <(awk -F'\t' '{print $NF}' ${outdir}/hc_genes/${sample}_${gene}_regions.tsv);
+done;
+done
+
+
+#6. In .fna and .faa files we just created, add sample and bin names to beginning of the header.--------------------------------------------------------------------------------------------
+##Add MAG label (unbinned sequences are left blank)
+for sample in $(cat ${sample_list}); do
+for gene in $(cat ${unique}); do
+name_legend=${outdir}/hc_genes/${sample}_${gene}_regions.tsv
+for id in $(cat ${outdir}/hc_genes/fasta_files/${sample}_${gene}.faa | grep -e '[>]' | awk -F' ' '{print $1}' | sed 's/[>]//g'| sort | uniq); do
+bin=$(awk -F'\t'\
+    -v col=2 \
+    -v val=${id} \
+    '$col==val {print $35}' ${name_legend})
+gawk -i inplace -v id=${id} -v name=${bin} 'BEGIN{FS=OFS="\t"} {gsub(">" id, ">" name ";" id)} 1' \
+${outdir}/hc_genes/fasta_files/${sample}_${gene}.faa;
+done;
+done;
+done
+
+for sample in $(cat ${sample_list}); do
+for gene in $(cat ${unique}); do
+name_legend=${outdir}/hc_genes/${sample}_${gene}_regions.tsv
+for id in $(cat ${outdir}/hc_genes/fasta_files/${sample}_${gene}.fna | grep -e '[>]' | awk -F':' '{print $1}' | sed 's/[>]//g'| sort | uniq); do
+bin=$(awk -F'\t'\
+    -v col=10 \
+    -v val=${id} \
+    '$col==val {print $35}' ${name_legend})
+gawk -i inplace -v id=${id} -v name=${bin} 'BEGIN{FS=OFS="\t"} {gsub(">" id, ">" name ";" id)} 1' \
+${outdir}/hc_genes/fasta_files/${sample}_${gene}.fna;
+done;
+done;
+done
+
+##Add sample label
+for sample in $(cat ${sample_list}); do
+for gene in $(cat ${unique}); do
+gawk -i inplace -v sample=${sample} 'BEGIN{FS=OFS="\t"} {gsub(">", ">" sample ";")} 1' \
+${outdir}/hc_genes/fasta_files/${sample}_${gene}.faa;
+done;
+done
+
+for sample in $(cat ${sample_list}); do
+for gene in $(cat ${unique}); do
+gawk -i inplace -v sample=${sample} 'BEGIN{FS=OFS="\t"} {gsub(">", ">" sample ";")} 1' \
+${outdir}/hc_genes/fasta_files/${sample}_${gene}.fna;
+done;
+done
+
+#7. Concat all fastas for a particular gene across genomes-------------------------------------------------------------------------------------------------------------------------
+for gene in $(cat ${unique}); do
+cat ${outdir}/hc_genes/fasta_files/*_${gene}.faa > ${outdir}/hc_genes/fasta_files/${gene}_all_mags.faa;
+done
+
+for gene in $(cat ${unique}); do
+cat ${outdir}/hc_genes/fasta_files/*_${gene}.fna > ${outdir}/hc_genes/fasta_files/${gene}_all_mags.fna;
+done
+
+#8. Multiple sequence alignment (written as slurm array job)---------------------------------------------------------------
+#(written as a slurm for the Nibi Compute Canada Cluster)
+
+module load mafft-mpi
+outdir=/project/6105702/CMO_2024_Metagenome/CMO2024_MAGS/canthyd_single_gene_analysis/hc_genes/fasta_files
+mkdir -p ${outdir}/msa
+unique=${outdir}/unique_simple.txt
+gene=$(sed -n "${SLURM_ARRAY_TASK_ID}p" ${unique})
+
+#Nucleotide alignment
+mafft --genafpair \
+--maxiterate 1000 \
+--thread 4 \
+--reorder ${outdir}/${gene}_all_mags.faa > ${outdir}/msa/${gene}_all_mags_alignment.faa
+
+#Amino acid alignment
+mafft --genafpair \
+--maxiterate 1000 \
+--thread 4 \
+--reorder ${outdir}/${gene}_all_mags.fna > ${outdir}/msa/${gene}_all_mags.fna
+
+#9. Filter out columns with >80% gaps using TrimAl---------------------------------------------------------------------------------------------------------------------------------
+#(written as a slurm array job for the Nibi Compute Canada Cluster)
+module load trimal
+outdir=/project/6105702/CMO_2024_Metagenome/CMO2024_MAGS/canthyd_single_gene_analysis
+mkdir -p ${outdir}/msa
+unique=${outdir}/unique_simple.txt
+gene=$(sed -n "${SLURM_ARRAY_TASK_ID}p" ${unique})
+
+##Filter nucleotide alignments
+trimal -in ${outdir}/msa/${gene}_all_mags_alignment.fna -out ${outdir}/msa/${gene}_all_mags_alignment_filt.fna \
+-gt 0.80 \
+-keepheader \
+-sident \
+-soverlap \
+-htmlout ${outdir}/msa/${gene}_all_mags_nucleotide_alignment_filt.html
+
+##Filter amino acid alignments
+trimal -in ${outdir}/msa/${gene}_all_mags_alignment.faa -out ${outdir}/msa/${gene}_all_mags_alignment_filt.faa \
+-gt 0.80 \
+-keepheader \
+-sident \
+-soverlap \
+-htmlout ${outdir}/msa/${gene}_all_mags_amino_acid_alignment_filt.html
+
+#10. Get counts for each gene in each genome---------------------------------------------------------------------------------------------------------------------------------------
+	##We are going to use the the hmm_w_gff files we created at the beginning to get counts for each unique gene.
+	##You just need to define the column that describes the gene annotation you would like to count by.
+
+
+outdir=/project/6105702/CMO_2024_Metagenome/CMO2024_MAGS/canthyd_single_gene_analysis
+
+##Change NF to the column for which you want to organize/count by
+mkdir -p ${outdir}/gene_counts
+
+for sample in $(cat ${sample_list}); do
+for genome in $(cat ${outdir}/${sample}_hmm_w_gff.tsv | awk -F'\t' '{print $34}' | sort | uniq); do
+awk -F'\t'\
+    -v col=34 \
+    -v val=${genome} \
+    '$col==val {print}' ${outdir}/${sample}_hmm_w_gff.tsv > ${outdir}/gene_counts/${genome}_hmm_w_gff.tsv
+
+awk 'BEGIN{FS=OFS="\t"} {count[$(33)]++} END {for (i in count) print i, count[i]}' ${outdir}/gene_counts/${genome}_hmm_w_gff.tsv > ${outdir}/gene_counts/${genome}_gene_counts.tsv
+
+rm ${outdir}/gene_counts/${genome}_hmm_w_gff.tsv;
+done;
+done
+
+##Create a summary count file (1 file per gene, but counts from genomes are combined)
+	##The unique variable should reflect the exact gene annotations used to count by.
+	##In my case this was a combination of the gene name and product description I made earlier on.
+	##Therefore I am redefining the unique_hits file to reflect the more detailed descriptions that I am counting by.
+unique=${outdir}/unique_hits.tsv
+for sample in $(cat ${sample_list}); do
+for genome in $(cat ${outdir}/${sample}_hmm_w_gff.tsv | awk -F'\t' '{print $34}' | sort | uniq); do
+for gene in $(cat ${unique}); do
+awk -F'\t' -v OFS='\t' \
+    -v col=1 \
+    -v val=${gene} \
+    -v genome=${genome} \
+    '$col==val {$(NF+1)=genome; print }' \
+${outdir}/gene_counts/${genome}_gene_counts.tsv \
+>> ${outdir}/gene_counts/gene_counts_all_genomes.tsv;
+done;
+done;
+done
+
+#Filtered alignments and html files are used for downstream analyses (e.g., tree construction)
