@@ -9,6 +9,9 @@
     #c. List of gene calls (in my case I was working with the .gff3 output or .faa output from bakta
       #depending on if I was analysing nucleotide or amino acid sequences).
     #d. Python script: merge_hmmsearch_and_gene_annotation.py
+    #e. Completeness/Contamination estimates for MAGs. This is to label sequences in the multiple sequence alignment.
+		##MAGs >90% completeness and <5% contamination will be labelled as high quality.
+		##This allows for the reader to see where the highest quality taxonomic classifications are versus lower quality.
 
 #MULTIPLE BASH SCRIPTS/LOOPS WITH A COMMON SET OF BASH VARIABLES
 
@@ -26,6 +29,7 @@ amino_acid_calls_file=annotation.faa
 contig_bin_legend=/project/6105702/CMO_2024_Metagenome/CMO2024_MAGS/mag_sets/all_bin_contig_legend_both_pools.tsv
 merge_python_script=/project/6105702/CMO_2024_Metagenome/general_job_scripts/merge_hmmsearch_and_gene_annotation.py
 merge_python_script_requirements=/project/6105702/CMO_2024_Metagenome/general_job_scripts/hmm_bakta_merge_requirements.txt
+checkm2=
 
 #Make the primary output directory
 outdir=/project/6105702/CMO_2024_Metagenome/CMO2024_MAGS/canthyd_single_gene_analysis
