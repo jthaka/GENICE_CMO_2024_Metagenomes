@@ -21,7 +21,7 @@ hmm_tblout_file=hmm_hits.tblout
 gene_calls_dir=/path/to/gene/calls/output/per/${genome}  #NOTE: should have a separate dir for each genome
 gene_calls_file=annotation.gff3
 amino_acid_calls_dir=/path/to/gene/calls/output/per/${genome}
-amino_acid_calls_file=annotation.fa
+amino_acid_calls_file=annotation.faa
 merge_python_script=path/to/merge_hmmsearch_and_gene_annotation.py
 merge_python_script_requirements=path/to/merge_hmmsearch_and_gene_annotation_python_installs.txt
 
