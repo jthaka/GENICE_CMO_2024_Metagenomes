@@ -150,7 +150,7 @@ done
 for genome in $(cat ${genome_list}); do
 for gene in $(cat ${unique}); do
 gawk -i inplace -v name=${genome} 'BEGIN{FS=OFS="\t"} {gsub(">", ">"name";")} 1' \
-${genome_dir}/${genome}.faa;
+${outdir}/${genome}/${gene}_${genome}.faa;
 done;
 done
 
