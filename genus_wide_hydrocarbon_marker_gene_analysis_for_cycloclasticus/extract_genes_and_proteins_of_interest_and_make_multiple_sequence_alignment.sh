@@ -106,8 +106,7 @@ awk -F'\t' -v OFS='\t' \
     -v col=3 \
     -v val=${gene} \
     'NR==1 { print; next } $col==val { print }' \
-${outdir}/${genome}_hmm_w_gff.tsv;
-${outdir}/${genome}/${gene}_regions.tsv;
+${outdir}/${genome}_hmm_w_gff.tsv > ${outdir}/${genome}/${gene}_regions.tsv;
 done;
 done
 
