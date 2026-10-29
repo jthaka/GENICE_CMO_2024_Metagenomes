@@ -29,7 +29,7 @@ fasta_files_path=/project/6105702/CMO_2024_Metagenome/CYCLOCLASTICUS_PHYLOGENOMI
 
 #Make output directory
 outdir=/project/6105702/CMO_2024_Metagenome/CYCLOCLASTICUS_PHYLOGENOMICS/scgs
-mkdir -p ${output}
+mkdir -p ${outdir}
 
 #Run gtotree
 apptainer exec \
