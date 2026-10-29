@@ -16,10 +16,8 @@ module load apptainer
 
 SIF=/project/6105702/general_scripts_and_sifs/gtotree.sif
 
-: '
 #I realize these variables are annoying- but its set up to make sure the paths are 
-bound properly to apptainer
-'
+#bound properly to apptainer
 
 #File legend (realpaths to all fasta files in one file)
 
@@ -40,12 +38,11 @@ apptainer exec \
   --bind ${outdir} \
   ${SIF} \
   GToTree \
-  -f ${file_legend_path}/${file_legend_file_name} \
+        -f ${file_legend_path}/${file_legend_file_name} \
 	-H Gammaproteobacteria \
-  -m genome_to_id_map.tsv \
-  -j 4 \
-  -o ${outdir} \
+	-j 4 \
+        -o ${outdir} \
 	-N \
-  -nt $SLURM_CPUS_PER_TASK
+        -nt $SLURM_CPUS_PER_TASK
 
 #2. Create a maximum likelihood tree with IQTree and model finder.
